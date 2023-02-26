@@ -1,0 +1,4 @@
+# to ignore auth headers file
+/*.json
+
+__pycache__
