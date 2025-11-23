@@ -237,28 +237,28 @@ class Interface:
             else:
                 timer_text = ""
 
-            # Update the top row: timer on left, song name centered
+            # Update the top row: timer on left with margin, song name beside it
             song_name = self.current_song_name
-            timer_width = len(timer_text) if timer_text else 0
+            timer_margin = 4  # Right margin for timer
             
-            # Build the top row: timer on left, song name centered
+            # Build the top row: timer + margin + song name
             if timer_text and song_name:
-                # Calculate space for song name (remaining width after timer)
-                remaining_width = available_width - timer_width
+                # Calculate space for song name (remaining width after timer and margin)
+                timer_with_margin_width = len(timer_text) + timer_margin
+                remaining_width = available_width - timer_with_margin_width
                 if remaining_width > 0:
-                    # Center song name in remaining space
+                    # Truncate song name if needed
                     song_display = song_name[:remaining_width]
-                    padding = (remaining_width - len(song_display)) // 2
-                    top_row = timer_text + ' ' * padding + song_display
+                    top_row = timer_text + ' ' * timer_margin + song_display
                 else:
+                    # Not enough space, just show timer
                     top_row = timer_text
             elif timer_text:
                 top_row = timer_text
             elif song_name:
-                # Just center the song name
+                # Just show the song name
                 song_display = song_name[:available_width]
-                padding = (available_width - len(song_display)) // 2
-                top_row = ' ' * padding + song_display
+                top_row = song_display
             else:
                 top_row = ""
             
