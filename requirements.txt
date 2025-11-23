@@ -1,6 +1,7 @@
 # Core dependencies
 ytmusicapi>=1.0.0
 urwid>=2.1.0
+psutil>=5.8.0
 
 # Note: mpv must be installed separately via your system package manager
 # For example: sudo apt install mpv (Debian/Ubuntu) or sudo pacman -S mpv (Arch)

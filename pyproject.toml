@@ -26,6 +26,7 @@ classifiers = [
 dependencies = [
     "ytmusicapi>=1.0.0",
     "urwid>=2.1.0",
+    "psutil>=5.8.0",
 ]
 
 [project.scripts]

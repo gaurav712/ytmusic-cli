@@ -4,15 +4,91 @@ import socket
 import subprocess
 import shlex
 import logging
+import os
+import atexit
+import signal
 from time import sleep
-from typing import Optional, Callable, List, Dict, Any
-from threading import Thread
+from typing import Optional, Callable, List, Dict, Any, Set
+from threading import Thread, Lock
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 from ytmusicapi import YTMusic
 
 from ytmusic_cli.config import AUTH_HEADERS, IPC_SERVER_PATH, PAUSE_CMD, PLAY_CMD
 
 logger = logging.getLogger(__name__)
+
+# Global registry to track all mpv processes started by this application
+_mpv_processes: Set[int] = set()
+_process_lock = Lock()
+
+
+def _cleanup_mpv_processes() -> None:
+    """Clean up all tracked mpv processes."""
+    with _process_lock:
+        for pid in list(_mpv_processes):
+            try:
+                if PSUTIL_AVAILABLE:
+                    try:
+                        process = psutil.Process(pid)
+                        if process.is_running():
+                            cmdline = ' '.join(process.cmdline()).lower()
+                            if 'mpv' in cmdline:
+                                logger.debug(f"Terminating mpv process {pid}")
+                                process.terminate()
+                                try:
+                                    process.wait(timeout=2)
+                                except psutil.TimeoutExpired:
+                                    logger.warning(f"Force killing mpv process {pid}")
+                                    process.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+                else:
+                    # Fallback without psutil
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                        sleep(0.5)
+                        # Check if still alive and force kill
+                        try:
+                            os.kill(pid, 0)  # Check if process exists
+                            os.kill(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass  # Already dead
+                    except ProcessLookupError:
+                        pass  # Process doesn't exist
+            except Exception as e:
+                logger.warning(f"Error cleaning up process {pid}: {e}")
+        _mpv_processes.clear()
+
+
+def _cleanup_orphaned_mpv() -> None:
+    """Clean up any orphaned mpv processes using our IPC socket."""
+    try:
+        # Check if socket exists and try to connect
+        if os.path.exists(IPC_SERVER_PATH):
+            try:
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(0.5)
+                sock.connect(IPC_SERVER_PATH)
+                sock.close()
+            except (socket.error, ConnectionRefusedError):
+                # Socket exists but no process listening - clean it up
+                try:
+                    os.unlink(IPC_SERVER_PATH)
+                except OSError:
+                    pass
+    except Exception as e:
+        logger.debug(f"Error checking for orphaned mpv: {e}")
+
+
+# Register cleanup functions
+atexit.register(_cleanup_mpv_processes)
+atexit.register(_cleanup_orphaned_mpv)
 
 
 class PlayerThread(Thread):
@@ -32,12 +108,20 @@ class PlayerThread(Thread):
     def run(self) -> None:
         """Start mpv player and establish IPC connection."""
         try:
+            # Clean up any existing socket
+            _cleanup_orphaned_mpv()
+
             # Send notification
-            subprocess.run(
-                ['notify-send', 'YouTube Music', 'Playing: ' + self.url],
-                check=False,
-                capture_output=True
-            )
+            try:
+                subprocess.run(
+                    ['notify-send', 'YouTube Music', 'Playing: ' + self.url],
+                    check=False,
+                    capture_output=True,
+                    timeout=2
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                # notify-send not available or timed out - not critical
+                pass
 
             # Start the player with proper argument escaping
             cmd = [
@@ -47,15 +131,29 @@ class PlayerThread(Thread):
                 '--cache=no',
                 f'--input-ipc-server={IPC_SERVER_PATH}'
             ]
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+            try:
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True  # Create new process group
+                )
+            except FileNotFoundError:
+                logger.error("mpv not found. Please install mpv: sudo apt install mpv (or equivalent)")
+                raise
+            except Exception as e:
+                logger.error(f"Failed to start mpv: {e}")
+                raise
+
+            # Track the process
+            if self.process and self.process.pid:
+                with _process_lock:
+                    _mpv_processes.add(self.process.pid)
 
             # Create a socket object
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(5.0)  # Set timeout for connection
 
             # Connect to the socket with retry logic
             max_retries = 5
@@ -63,35 +161,98 @@ class PlayerThread(Thread):
                 sleep(0.5)
                 try:
                     self.sock.connect(IPC_SERVER_PATH)
+                    self.sock.settimeout(None)  # Remove timeout after connection
                     break
-                except (socket.error, FileNotFoundError) as e:
+                except (socket.error, FileNotFoundError, ConnectionRefusedError) as e:
                     if attempt == max_retries - 1:
                         logger.error(f"Failed to connect to IPC socket after {max_retries} attempts: {e}")
+                        # Clean up the process if socket connection failed
+                        if self.process:
+                            try:
+                                self.process.terminate()
+                                self.process.wait(timeout=1)
+                            except:
+                                if self.process:
+                                    self.process.kill()
                         raise
+                except Exception as e:
+                    logger.error(f"Unexpected error connecting to socket: {e}")
+                    raise
         except Exception as e:
             logger.error(f"Error in PlayerThread.run: {e}")
+            # Ensure cleanup on error
+            self.terminate()
             raise
 
     def terminate(self) -> None:
         """Terminate the player process and close socket."""
+        # Close socket first
         if self.sock:
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+            except (socket.error, OSError):
+                pass
             try:
                 self.sock.close()
             except Exception as e:
-                logger.warning(f"Error closing socket: {e}")
+                logger.debug(f"Error closing socket: {e}")
             finally:
                 self.sock = None
 
+        # Terminate process
         if self.process:
+            pid = self.process.pid
             try:
-                self.process.terminate()
-                self.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
+                # Remove from tracking
+                with _process_lock:
+                    _mpv_processes.discard(pid)
+
+                # Try graceful termination
+                if self.process.poll() is None:  # Process still running
+                    try:
+                        # Try to terminate the process group (kills child processes too)
+                        try:
+                            pgid = os.getpgid(pid)
+                            os.killpg(pgid, signal.SIGTERM)
+                        except (ProcessLookupError, OSError, AttributeError):
+                            # Fall back to process.terminate() if process group fails
+                            self.process.terminate()
+                    except ProcessLookupError:
+                        pass  # Already dead
+
+                    # Wait for termination
+                    try:
+                        self.process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        # Force kill if it doesn't terminate
+                        try:
+                            try:
+                                pgid = os.getpgid(pid)
+                                os.killpg(pgid, signal.SIGKILL)
+                            except (ProcessLookupError, OSError, AttributeError):
+                                self.process.kill()
+                        except ProcessLookupError:
+                            pass  # Already dead
+            except ProcessLookupError:
+                # Process already terminated
+                pass
             except Exception as e:
-                logger.warning(f"Error terminating process: {e}")
+                logger.warning(f"Error terminating process {pid}: {e}")
+                # Last resort: try to kill by PID
+                try:
+                    if pid:
+                        os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
             finally:
                 self.process = None
+
+        # Clean up socket file if it exists
+        try:
+            if os.path.exists(IPC_SERVER_PATH):
+                os.unlink(IPC_SERVER_PATH)
+        except OSError:
+            pass
 
     def send_command(self, ipc_command_json: str) -> Optional[bytes]:
         """Send an IPC command to mpv and receive response.
@@ -103,7 +264,12 @@ class PlayerThread(Thread):
             Response bytes from mpv, or None on error
         """
         if not self.sock:
-            logger.warning("Socket not connected, cannot send command")
+            logger.debug("Socket not connected, cannot send command")
+            return None
+
+        # Check if process is still alive
+        if self.process and self.process.poll() is not None:
+            logger.debug("mpv process has terminated")
             return None
 
         try:
@@ -112,8 +278,11 @@ class PlayerThread(Thread):
 
             # Receive a response from the socket
             return self.sock.recv(1024)
+        except (socket.error, BrokenPipeError, ConnectionResetError) as e:
+            logger.debug(f"Socket error sending command: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error sending command: {e}")
+            logger.warning(f"Unexpected error sending command: {e}")
             return None
 
     def play(self) -> None:
@@ -206,5 +375,8 @@ class Player:
 
     def cleanup(self) -> None:
         """Clean up resources. Call this before destroying the player."""
-        self.stop()
+        try:
+            self.stop()
+        except Exception as e:
+            logger.warning(f"Error during player cleanup: {e}")
 

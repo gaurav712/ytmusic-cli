@@ -36,6 +36,7 @@ setup(
     install_requires=[
         "ytmusicapi>=1.0.0",
         "urwid>=2.1.0",
+        "psutil>=5.8.0",
     ],
     python_requires=">=3.7",
     entry_points={
