@@ -46,6 +46,7 @@ class Interface:
             self.status = urwid.Text('')
             self.progress_row = urwid.Text('')
             self.footer = urwid.Pile([
+                (1, urwid.SolidFill()),  # Blank row above bottom two rows
                 self.now_playing,
                 self.progress_row,
                 self.status
@@ -55,9 +56,14 @@ class Interface:
                 self.is_searching,
                 urwid.SimpleFocusListWalker([])
             )
+            # Add blank row above listbox
+            body_with_blank = urwid.Pile([
+                (1, urwid.SolidFill()),  # Blank row above song list
+                self.listbox
+            ])
             self.frame = urwid.Frame(
                 header=self.header,
-                body=self.listbox,
+                body=body_with_blank,
                 footer=self.footer
             )
             top = urwid.Padding(self.frame, left=2, right=2)
