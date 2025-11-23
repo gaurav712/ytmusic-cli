@@ -297,7 +297,7 @@ class Interface:
 
                 video_id = choice.get('videoId')
                 if video_id:
-                    self.player.start(f'https://music.youtube.com/watch?v={video_id}')
+                    self.player.start(f'https://music.youtube.com/watch?v={video_id}', display_text)
         except Exception as e:
             logger.error(f"Error in item_chosen: {e}")
             self.status.set_text(f'Error: {str(e)}')

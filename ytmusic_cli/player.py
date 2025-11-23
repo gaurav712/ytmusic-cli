@@ -96,14 +96,16 @@ atexit.register(_cleanup_orphaned_mpv)
 class PlayerThread(Thread):
     """Thread for managing mpv playback process and IPC communication."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, song_name: Optional[str] = None) -> None:
         """Initialize the player thread with a URL.
 
         Args:
             url: YouTube Music URL to play
+            song_name: Optional song name for notifications
         """
         super().__init__(daemon=True)
         self.url = url
+        self.song_name = song_name
         self.process: Optional[subprocess.Popen] = None
         self.sock: Optional[socket.socket] = None
 
@@ -117,8 +119,9 @@ class PlayerThread(Thread):
             notify_send_path = shutil.which('notify-send')
             if notify_send_path:
                 try:
+                    notification_text = self.song_name if self.song_name else self.url
                     subprocess.run(
-                        [notify_send_path, 'YouTube Music', 'Playing: ' + self.url],
+                        [notify_send_path, 'YouTube Music', 'Playing: ' + notification_text],
                         check=False,
                         capture_output=True,
                         timeout=2
@@ -458,14 +461,15 @@ class Player:
             logger.error(f"Error getting recommended songs: {e}")
             callback([])
 
-    def start(self, url: str) -> None:
+    def start(self, url: str, song_name: Optional[str] = None) -> None:
         """Start playing a URL.
 
         Args:
             url: YouTube Music URL to play
+            song_name: Optional song name for notifications
         """
         self.stop()  # Stop any existing playback
-        self.playback = PlayerThread(url)
+        self.playback = PlayerThread(url, song_name)
         self.playback.start()
         self.playing = True
 
