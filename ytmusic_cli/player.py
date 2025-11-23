@@ -142,6 +142,7 @@ class PlayerThread(Thread):
                 self.url,
                 '--no-video',
                 '--cache=no',
+                '--start=0',
                 f'--input-ipc-server={IPC_SERVER_PATH}'
             ]
             try:
