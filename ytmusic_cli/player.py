@@ -8,6 +8,7 @@ import os
 import atexit
 import signal
 import json
+import shutil
 from time import sleep
 from typing import Optional, Callable, List, Dict, Any, Set
 from threading import Thread, Lock
@@ -112,21 +113,29 @@ class PlayerThread(Thread):
             # Clean up any existing socket
             _cleanup_orphaned_mpv()
 
-            # Send notification
-            try:
-                subprocess.run(
-                    ['notify-send', 'YouTube Music', 'Playing: ' + self.url],
-                    check=False,
-                    capture_output=True,
-                    timeout=2
-                )
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                # notify-send not available or timed out - not critical
-                pass
+            # Send notification (only if notify-send is available)
+            notify_send_path = shutil.which('notify-send')
+            if notify_send_path:
+                try:
+                    subprocess.run(
+                        [notify_send_path, 'YouTube Music', 'Playing: ' + self.url],
+                        check=False,
+                        capture_output=True,
+                        timeout=2
+                    )
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    # notify-send not available or timed out - not critical
+                    pass
+
+            # Find mpv dynamically
+            mpv_path = shutil.which('mpv')
+            if not mpv_path:
+                logger.error("mpv not found. Please install mpv: sudo apt install mpv (or equivalent)")
+                raise FileNotFoundError("mpv executable not found in PATH")
 
             # Start the player with proper argument escaping
             cmd = [
-                'mpv',
+                mpv_path,
                 self.url,
                 '--no-video',
                 '--cache=no',
