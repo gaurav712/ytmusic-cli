@@ -7,6 +7,8 @@ A terminal-based frontend for YouTube Music using urwid for UI, ytmusicapi for A
 - Search and play YouTube Music songs from the terminal
 - Vim-like navigation (j/k keys)
 - Play/pause control
+- Progress bar and time display
+- Seeking support (left/right arrow keys)
 - Clean, minimal interface
 
 ## Requirements
@@ -90,6 +92,8 @@ ytmusic-cli --verbose
 - `k` - Move up in list
 - `Enter` - Select item / Submit search
 - `Space` - Play/Pause
+- `h` - Seek backward 10 seconds
+- `l` - Seek forward 10 seconds
 - `q` - Quit
 
 ## Project Structure

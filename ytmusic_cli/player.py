@@ -7,6 +7,7 @@ import logging
 import os
 import atexit
 import signal
+import json
 from time import sleep
 from typing import Optional, Callable, List, Dict, Any, Set
 from threading import Thread, Lock
@@ -293,6 +294,61 @@ class PlayerThread(Thread):
         """Pause playback."""
         self.send_command(PAUSE_CMD)
 
+    def get_property(self, property_name: str) -> Optional[Any]:
+        """Get a property value from mpv.
+
+        Args:
+            property_name: Name of the property to get
+
+        Returns:
+            Property value or None on error
+        """
+        cmd = json.dumps({"command": ["get_property", property_name]}) + "\n"
+        response = self.send_command(cmd)
+        if response:
+            try:
+                data = json.loads(response.decode())
+                if "data" in data:
+                    return data["data"]
+            except (json.JSONDecodeError, KeyError, UnicodeDecodeError):
+                pass
+        return None
+
+    def is_paused(self) -> Optional[bool]:
+        """Check if playback is paused.
+
+        Returns:
+            True if paused, False if playing, None on error
+        """
+        return self.get_property("pause")
+
+    def get_time_pos(self) -> Optional[float]:
+        """Get current playback position in seconds.
+
+        Returns:
+            Current time position in seconds, or None on error
+        """
+        return self.get_property("time-pos")
+
+    def get_duration(self) -> Optional[float]:
+        """Get total duration of the current track in seconds.
+
+        Returns:
+            Duration in seconds, or None on error
+        """
+        return self.get_property("duration")
+
+    def seek(self, seconds: float, relative: bool = False) -> None:
+        """Seek to a specific position.
+
+        Args:
+            seconds: Time in seconds to seek to (absolute) or offset (relative)
+            relative: If True, seek relative to current position; if False, seek to absolute position
+        """
+        seek_type = "relative" if relative else "absolute"
+        cmd = json.dumps({"command": ["seek", seconds, seek_type]}) + "\n"
+        self.send_command(cmd)
+
 
 class Player:
     """Main player class for YouTube Music."""
@@ -360,7 +416,9 @@ class Player:
         if self.playback:
             try:
                 self.playback.play()
-                self.playing = True
+                # Update state based on actual mpv state
+                is_paused = self.playback.is_paused()
+                self.playing = not is_paused if is_paused is not None else True
             except Exception as e:
                 logger.error(f"Error resuming playback: {e}")
 
@@ -369,9 +427,54 @@ class Player:
         if self.playback:
             try:
                 self.playback.pause()
-                self.playing = False
+                # Update state based on actual mpv state
+                is_paused = self.playback.is_paused()
+                self.playing = not is_paused if is_paused is not None else False
             except Exception as e:
                 logger.error(f"Error pausing playback: {e}")
+
+    def is_paused(self) -> Optional[bool]:
+        """Check if playback is paused.
+
+        Returns:
+            True if paused, False if playing, None if not playing or error
+        """
+        if self.playback:
+            return self.playback.is_paused()
+        return None
+
+    def get_time_pos(self) -> Optional[float]:
+        """Get current playback position in seconds.
+
+        Returns:
+            Current time position in seconds, or None on error
+        """
+        if self.playback:
+            return self.playback.get_time_pos()
+        return None
+
+    def get_duration(self) -> Optional[float]:
+        """Get total duration of the current track in seconds.
+
+        Returns:
+            Duration in seconds, or None on error
+        """
+        if self.playback:
+            return self.playback.get_duration()
+        return None
+
+    def seek(self, seconds: float, relative: bool = False) -> None:
+        """Seek to a specific position.
+
+        Args:
+            seconds: Time in seconds to seek to (absolute) or offset (relative)
+            relative: If True, seek relative to current position; if False, seek to absolute position
+        """
+        if self.playback:
+            try:
+                self.playback.seek(seconds, relative)
+            except Exception as e:
+                logger.error(f"Error seeking: {e}")
 
     def cleanup(self) -> None:
         """Clean up resources. Call this before destroying the player."""
