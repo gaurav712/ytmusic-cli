@@ -88,6 +88,10 @@ class Interface:
             self.mainloop.screen.set_mouse_tracking(False)
             # Set up recurring alarm to update UI
             self._schedule_progress_update()
+            
+            # Load recommended songs on boot
+            self._load_recommended()
+            
             self.mainloop.run()
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
@@ -359,6 +363,18 @@ class Interface:
                     progress = min(max((time_pos / duration) * 100, 0), 100)
                 self._update_progress_display(time_pos, duration, is_paused, progress)
 
+    def _load_recommended(self) -> None:
+        """Load recommended songs on boot."""
+        if self.player:
+            self.status.set_text('Loading recommended songs...')
+            # Load recommended async
+            load_thread = Thread(
+                target=self.player.get_recommended,
+                args=(self.search_thread_callback,),
+                daemon=True
+            )
+            load_thread.start()
+
     def handle_search(self) -> None:
         """Handle search query submission."""
         query = self.status_text[1:] if self.status_text.startswith('/') else self.status_text
@@ -408,7 +424,9 @@ class Interface:
             
             self.searching = False
             self.status_text = ''
-            self.status.set_text('')
+            # Only clear status if not in search mode (to avoid clearing "Loading recommended songs...")
+            if not self.searching:
+                self.status.set_text('')
         except Exception as e:
             logger.error(f"Error in search_thread_callback: {e}")
             self.status.set_text(f'Error displaying results: {str(e)}')

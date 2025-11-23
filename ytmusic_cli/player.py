@@ -389,6 +389,66 @@ class Player:
             logger.error(f"Search error: {e}")
             callback([])
 
+    def get_recommended(self, callback: Callable[[List[Dict[str, Any]]], None]) -> None:
+        """Get recommended songs from YouTube Music home page.
+
+        Args:
+            callback: Function to call with recommended songs
+        """
+        try:
+            # Get home content without limit to avoid parsing issues
+            home = self.ytmusic.get_home()
+            songs = []
+            
+            # Extract songs from home page sections
+            for section in home:
+                try:
+                    # Get section title to identify recommended sections
+                    section_title = section.get('title', '').lower()
+                    
+                    # Look for recommended sections or any section with songs
+                    # Skip sections that are not music content (like action cards)
+                    if 'action' in section_title or 'card' in section_title:
+                        continue
+                    
+                    # Get contents from section
+                    contents = section.get('contents', [])
+                    
+                    for item in contents:
+                        try:
+                            # Check if it's a song directly (has videoId and title)
+                            if 'videoId' in item and 'title' in item:
+                                # Make sure it has artists (to filter out non-song items)
+                                if 'artists' in item and len(item.get('artists', [])) > 0:
+                                    songs.append(item)
+                            # Check if it's a musicShelf or similar with nested items
+                            elif 'items' in item:
+                                for nested_item in item.get('items', []):
+                                    if 'videoId' in nested_item and 'title' in nested_item:
+                                        if 'artists' in nested_item and len(nested_item.get('artists', [])) > 0:
+                                            songs.append(nested_item)
+                        except (KeyError, TypeError, AttributeError) as e:
+                            logger.debug(f"Error processing item in section: {e}")
+                            continue
+                except (KeyError, TypeError, AttributeError) as e:
+                    logger.debug(f"Error processing section: {e}")
+                    continue
+            
+            # Remove duplicates based on videoId
+            seen_ids = set()
+            unique_songs = []
+            for song in songs:
+                video_id = song.get('videoId')
+                if video_id and video_id not in seen_ids:
+                    seen_ids.add(video_id)
+                    unique_songs.append(song)
+            
+            # Limit to first 50 songs
+            callback(unique_songs[:50])
+        except Exception as e:
+            logger.error(f"Error getting recommended songs: {e}")
+            callback([])
+
     def start(self, url: str) -> None:
         """Start playing a URL.
 
