@@ -13,6 +13,12 @@ from ytmusic_cli.custom_list_box import CustomListBox
 logger = logging.getLogger(__name__)
 
 
+class NoMouseWidget(urwid.WidgetWrap):
+    """Widget wrapper that disables all mouse events."""
+    def mouse_event(self, size, event, button, col, row, focus):
+        return False
+
+
 class Interface:
     """Main interface class for the YouTube Music CLI."""
 
@@ -66,7 +72,8 @@ class Interface:
                 body=body_with_blank,
                 footer=self.footer
             )
-            top = urwid.Padding(self.frame, left=2, right=2)
+            # Wrap in NoMouseWidget to disable mouse events
+            top = NoMouseWidget(urwid.Padding(self.frame, left=2, right=2))
 
             # Initialize the player
             self.player = Player(auth_headers_path)
@@ -77,6 +84,8 @@ class Interface:
             self.update_thread.start()
 
             self.mainloop = urwid.MainLoop(top, unhandled_input=self.handle_keypress)
+            # Disable mouse interactions
+            self.mainloop.screen.set_mouse_tracking(False)
             # Set up recurring alarm to update UI
             self._schedule_progress_update()
             self.mainloop.run()
