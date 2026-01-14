@@ -76,7 +76,12 @@ class Interface:
             self.update_thread = Thread(target=self._update_progress_loop, daemon=True)
             self.update_thread.start()
 
-            self.mainloop = urwid.MainLoop(top, unhandled_input=self.handle_keypress)
+            # Set up palette for list item highlighting
+            palette = [
+                ("normal", "light gray", "default"),  # Normal: transparent/default background
+                ("selected", "black", "light gray"),  # Selected: inverted colors
+            ]
+            self.mainloop = urwid.MainLoop(top, palette=palette, unhandled_input=self.handle_keypress)
             # Disable mouse interactions
             self.mainloop.screen.set_mouse_tracking(False)
             # Set up recurring alarm to update UI
@@ -136,6 +141,12 @@ class Interface:
         """Create a text-based progress bar."""
         filled = int((progress / 100) * width)
         return '[' + '#' * filled + ' ' * (width - filled) + ']'
+
+    def _create_list_button(self, text: str, choice: Dict[str, Any]) -> urwid.Widget:
+        """Create a button with inverted focus colors."""
+        button = urwid.Button(text, on_press=self.item_chosen, user_data=choice)
+        # This inverts colors when the button is focused
+        return urwid.AttrMap(button, "normal", "selected")
 
     def _update_progress_loop(self) -> None:
         """Periodically fetch progress data from mpv."""
@@ -295,7 +306,7 @@ class Interface:
             return
 
         buttons = [
-            urwid.Button(self._format_song_display(r), on_press=self.item_chosen, user_data=r)
+            self._create_list_button(self._format_song_display(r), r)
             for r in search_results
         ]
 
