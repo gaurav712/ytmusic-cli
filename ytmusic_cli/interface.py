@@ -20,6 +20,24 @@ class NoMouseWidget(urwid.WidgetWrap):
         return False
 
 
+class SelectableText(urwid.Text):
+    """Selectable text widget without cursor - acts like a button."""
+    _selectable = True
+    signals = ["click"]
+
+    def keypress(self, size, key):
+        if self._command_map[key] == urwid.ACTIVATE:
+            self._emit('click')
+            return None
+        return key
+
+    def mouse_event(self, size, event, button, x, y, focus):
+        if button == 1 and urwid.util.is_mouse_press(event):
+            self._emit('click')
+            return True
+        return False
+
+
 class Interface:
     """Main interface class for the YouTube Music CLI."""
 
@@ -143,10 +161,10 @@ class Interface:
         return '[' + '#' * filled + ' ' * (width - filled) + ']'
 
     def _create_list_button(self, text: str, choice: Dict[str, Any]) -> urwid.Widget:
-        """Create a button with inverted focus colors."""
-        button = urwid.Button(text, on_press=self.item_chosen, user_data=choice)
-        # This inverts colors when the button is focused
-        return urwid.AttrMap(button, "normal", "selected")
+        """Create a selectable item with focus highlighting and no cursor."""
+        item = SelectableText(text)
+        urwid.connect_signal(item, 'click', self.item_chosen, choice)
+        return urwid.AttrMap(item, "normal", "selected")
 
     def _update_progress_loop(self) -> None:
         """Periodically fetch progress data from mpv."""
