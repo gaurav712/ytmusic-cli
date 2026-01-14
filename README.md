@@ -56,6 +56,7 @@ ytmusic-cli --verbose
 | Key | Action |
 |-----|--------|
 | `/` | Search |
+| `Escape` | Cancel Search |
 | `j` | Move down |
 | `k` | Move up |
 | `Enter` | Select / Submit |
