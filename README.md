@@ -4,22 +4,21 @@ A terminal-based frontend for YouTube Music using urwid for UI, ytmusicapi for A
 
 ## Features
 
-- Search and play YouTube Music songs from the terminal
+- Search and play YouTube Music songs
 - Vim-like navigation (j/k keys)
-- Play/pause control
-- Progress bar and time display
-- Seeking support (left/right arrow keys)
-- Clean, minimal interface
+- Play/pause and seeking controls
+- Progress bar with time display
+- Loads recommended songs on startup
 
 ## Requirements
 
 - Python 3.7+
-- mpv (must be installed separately)
+- mpv (system package)
 - YouTube Music auth headers file
 
 ## Installation
 
-1. Install system dependencies:
+1. Install mpv:
    ```bash
    # Debian/Ubuntu
    sudo apt install mpv
@@ -27,103 +26,58 @@ A terminal-based frontend for YouTube Music using urwid for UI, ytmusicapi for A
    # Arch Linux
    sudo pacman -S mpv
    
-   # macOS (with Homebrew)
+   # macOS
    brew install mpv
    ```
 
-2. Install Python dependencies:
-   
-   **Recommended (modern approach):**
+2. Install the package:
    ```bash
    pip install -e .
    ```
-   
-   This will automatically install setuptools if needed and install the package in editable mode.
-   
-   **Alternative:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-   
-   Note: If you encounter setuptools errors, install it first:
-   ```bash
-   pip install setuptools wheel
-   ```
 
-3. Set up YouTube Music auth headers:
-   - Follow the instructions at https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html
-   - Place the `headersauth.json` file in `~/.config/ytmusic-cli/` or specify a custom path
+3. Set up YouTube Music authentication:
+   - Follow the [ytmusicapi setup guide](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html)
+   - Save the headers file to `~/.config/ytmusic-cli/headersauth.json`
 
 ## Usage
 
-There are several ways to run the application:
-
-**1. Using the installed command (recommended after installation):**
 ```bash
 ytmusic-cli
 ```
 
-**2. As a Python module:**
+Or with options:
 ```bash
-python3 -m ytmusic_cli
-```
-
-**3. Directly running the main module:**
-```bash
-python3 -m ytmusic_cli.main
-```
-
-**With custom auth headers path:**
-```bash
-ytmusic-cli --auth-headers /path/to/headersauth.json
-# or
-python3 -m ytmusic_cli --auth-headers /path/to/headersauth.json
-```
-
-**With verbose logging:**
-```bash
+ytmusic-cli --auth-headers /path/to/headers.json
 ytmusic-cli --verbose
 ```
 
 ### Controls
 
-- `/` - Start search
-- `j` - Move down in list
-- `k` - Move up in list
-- `Enter` - Select item / Submit search
-- `Space` - Play/Pause
-- `h` - Seek backward 10 seconds
-- `l` - Seek forward 10 seconds
-- `q` - Quit
+| Key | Action |
+|-----|--------|
+| `/` | Search |
+| `j` | Move down |
+| `k` | Move up |
+| `Enter` | Select / Submit |
+| `Space` | Play/Pause |
+| `h` | Seek -10s |
+| `l` | Seek +10s |
+| `q` | Quit |
 
 ## Project Structure
 
 ```
 ytmusic-cli/
-├── ytmusic_cli/          # Main package
-│   ├── __init__.py       # Package initialization
-│   ├── config.py         # Configuration constants
-│   ├── player.py         # Player and playback logic
-│   ├── interface.py      # UI interface
-│   ├── custom_list_box.py # Custom UI widget
-│   └── main.py           # Entry point
-├── requirements.txt      # Python dependencies
-├── setup.py             # Package setup
-└── README.md            # This file
+├── pyproject.toml        # Package configuration
+├── ytmusic_cli/
+│   ├── main.py           # Entry point
+│   ├── interface.py      # UI
+│   ├── player.py         # Playback
+│   ├── config.py         # Constants
+│   └── custom_list_box.py
+└── README.md
 ```
-
-## Development
-
-To develop or modify the code:
-
-1. Clone the repository
-2. Install in development mode:
-   ```bash
-   pip install -e .
-   ```
-3. Make your changes
-4. Test the application
 
 ## License
 
-MIT License
+MIT

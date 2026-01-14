@@ -2,7 +2,6 @@
 
 import socket
 import subprocess
-import shlex
 import logging
 import os
 import atexit
@@ -13,12 +12,7 @@ from time import sleep
 from typing import Optional, Callable, List, Dict, Any, Set
 from threading import Thread, Lock
 
-try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-
+import psutil
 from ytmusicapi import YTMusic
 
 from ytmusic_cli.config import AUTH_HEADERS, IPC_SERVER_PATH, PAUSE_CMD, PLAY_CMD
@@ -35,36 +29,15 @@ def _cleanup_mpv_processes() -> None:
     with _process_lock:
         for pid in list(_mpv_processes):
             try:
-                if PSUTIL_AVAILABLE:
+                process = psutil.Process(pid)
+                if process.is_running() and 'mpv' in ' '.join(process.cmdline()).lower():
+                    process.terminate()
                     try:
-                        process = psutil.Process(pid)
-                        if process.is_running():
-                            cmdline = ' '.join(process.cmdline()).lower()
-                            if 'mpv' in cmdline:
-                                logger.debug(f"Terminating mpv process {pid}")
-                                process.terminate()
-                                try:
-                                    process.wait(timeout=2)
-                                except psutil.TimeoutExpired:
-                                    logger.warning(f"Force killing mpv process {pid}")
-                                    process.kill()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                        pass
-                else:
-                    # Fallback without psutil
-                    try:
-                        os.kill(pid, signal.SIGTERM)
-                        sleep(0.5)
-                        # Check if still alive and force kill
-                        try:
-                            os.kill(pid, 0)  # Check if process exists
-                            os.kill(pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass  # Already dead
-                    except ProcessLookupError:
-                        pass  # Process doesn't exist
-            except Exception as e:
-                logger.warning(f"Error cleaning up process {pid}: {e}")
+                        process.wait(timeout=2)
+                    except psutil.TimeoutExpired:
+                        process.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
         _mpv_processes.clear()
 
 
@@ -185,7 +158,7 @@ class PlayerThread(Thread):
                             try:
                                 self.process.terminate()
                                 self.process.wait(timeout=1)
-                            except:
+                            except (subprocess.TimeoutExpired, ProcessLookupError, OSError):
                                 if self.process:
                                     self.process.kill()
                         raise
@@ -204,99 +177,47 @@ class PlayerThread(Thread):
         if self.sock:
             try:
                 self.sock.shutdown(socket.SHUT_RDWR)
+                self.sock.close()
             except (socket.error, OSError):
                 pass
-            try:
-                self.sock.close()
-            except Exception as e:
-                logger.debug(f"Error closing socket: {e}")
-            finally:
-                self.sock = None
+            self.sock = None
 
         # Terminate process
         if self.process:
             pid = self.process.pid
+            with _process_lock:
+                _mpv_processes.discard(pid)
+            
             try:
-                # Remove from tracking
-                with _process_lock:
-                    _mpv_processes.discard(pid)
-
-                # Try graceful termination
-                if self.process.poll() is None:  # Process still running
+                if self.process.poll() is None:
+                    # Try process group termination first
                     try:
-                        # Try to terminate the process group (kills child processes too)
-                        try:
-                            pgid = os.getpgid(pid)
-                            os.killpg(pgid, signal.SIGTERM)
-                        except (ProcessLookupError, OSError, AttributeError):
-                            # Fall back to process.terminate() if process group fails
-                            self.process.terminate()
-                    except ProcessLookupError:
-                        pass  # Already dead
-
-                    # Wait for termination
+                        os.killpg(os.getpgid(pid), signal.SIGTERM)
+                    except (ProcessLookupError, OSError):
+                        self.process.terminate()
+                    
                     try:
                         self.process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
-                        # Force kill if it doesn't terminate
-                        try:
-                            try:
-                                pgid = os.getpgid(pid)
-                                os.killpg(pgid, signal.SIGKILL)
-                            except (ProcessLookupError, OSError, AttributeError):
-                                self.process.kill()
-                        except ProcessLookupError:
-                            pass  # Already dead
-            except ProcessLookupError:
-                # Process already terminated
+                        self.process.kill()
+            except (ProcessLookupError, OSError):
                 pass
-            except Exception as e:
-                logger.warning(f"Error terminating process {pid}: {e}")
-                # Last resort: try to kill by PID
-                try:
-                    if pid:
-                        os.kill(pid, signal.SIGKILL)
-                except (ProcessLookupError, OSError):
-                    pass
-            finally:
-                self.process = None
+            self.process = None
 
-        # Clean up socket file if it exists
+        # Clean up socket file
         try:
-            if os.path.exists(IPC_SERVER_PATH):
-                os.unlink(IPC_SERVER_PATH)
+            os.unlink(IPC_SERVER_PATH)
         except OSError:
             pass
 
     def send_command(self, ipc_command_json: str) -> Optional[bytes]:
-        """Send an IPC command to mpv and receive response.
-
-        Args:
-            ipc_command_json: JSON command string
-
-        Returns:
-            Response bytes from mpv, or None on error
-        """
-        if not self.sock:
-            logger.debug("Socket not connected, cannot send command")
+        """Send an IPC command to mpv and receive response."""
+        if not self.sock or (self.process and self.process.poll() is not None):
             return None
-
-        # Check if process is still alive
-        if self.process and self.process.poll() is not None:
-            logger.debug("mpv process has terminated")
-            return None
-
         try:
-            # Send the JSON IPC command to the socket
             self.sock.sendall(ipc_command_json.encode())
-
-            # Receive a response from the socket
             return self.sock.recv(1024)
-        except (socket.error, BrokenPipeError, ConnectionResetError) as e:
-            logger.debug(f"Socket error sending command: {e}")
-            return None
-        except Exception as e:
-            logger.warning(f"Unexpected error sending command: {e}")
+        except (socket.error, BrokenPipeError, ConnectionResetError):
             return None
 
     def play(self) -> None:
@@ -403,61 +324,30 @@ class Player:
             callback([])
 
     def get_recommended(self, callback: Callable[[List[Dict[str, Any]]], None]) -> None:
-        """Get recommended songs from YouTube Music home page.
-
-        Args:
-            callback: Function to call with recommended songs
-        """
+        """Get recommended songs from YouTube Music home page."""
+        def is_valid_song(item: Dict) -> bool:
+            return 'videoId' in item and 'title' in item and item.get('artists')
+        
         try:
-            # Get home content without limit to avoid parsing issues
             home = self.ytmusic.get_home()
             songs = []
             
-            # Extract songs from home page sections
             for section in home:
-                try:
-                    # Get section title to identify recommended sections
-                    section_title = section.get('title', '').lower()
-                    
-                    # Look for recommended sections or any section with songs
-                    # Skip sections that are not music content (like action cards)
-                    if 'action' in section_title or 'card' in section_title:
-                        continue
-                    
-                    # Get contents from section
-                    contents = section.get('contents', [])
-                    
-                    for item in contents:
-                        try:
-                            # Check if it's a song directly (has videoId and title)
-                            if 'videoId' in item and 'title' in item:
-                                # Make sure it has artists (to filter out non-song items)
-                                if 'artists' in item and len(item.get('artists', [])) > 0:
-                                    songs.append(item)
-                            # Check if it's a musicShelf or similar with nested items
-                            elif 'items' in item:
-                                for nested_item in item.get('items', []):
-                                    if 'videoId' in nested_item and 'title' in nested_item:
-                                        if 'artists' in nested_item and len(nested_item.get('artists', [])) > 0:
-                                            songs.append(nested_item)
-                        except (KeyError, TypeError, AttributeError) as e:
-                            logger.debug(f"Error processing item in section: {e}")
-                            continue
-                except (KeyError, TypeError, AttributeError) as e:
-                    logger.debug(f"Error processing section: {e}")
+                section_title = section.get('title', '').lower()
+                if 'action' in section_title or 'card' in section_title:
                     continue
+                
+                for item in section.get('contents', []):
+                    if is_valid_song(item):
+                        songs.append(item)
+                    for nested in item.get('items', []):
+                        if is_valid_song(nested):
+                            songs.append(nested)
             
-            # Remove duplicates based on videoId
-            seen_ids = set()
-            unique_songs = []
-            for song in songs:
-                video_id = song.get('videoId')
-                if video_id and video_id not in seen_ids:
-                    seen_ids.add(video_id)
-                    unique_songs.append(song)
-            
-            # Limit to first 50 songs
-            callback(unique_songs[:50])
+            # Deduplicate by videoId
+            seen = set()
+            unique = [s for s in songs if s.get('videoId') not in seen and not seen.add(s.get('videoId'))]
+            callback(unique[:50])
         except Exception as e:
             logger.error(f"Error getting recommended songs: {e}")
             callback([])
@@ -477,83 +367,36 @@ class Player:
     def stop(self) -> None:
         """Stop current playback."""
         if self.playback:
-            try:
-                self.playback.terminate()
-            except Exception as e:
-                logger.warning(f"Error stopping playback: {e}")
-            finally:
-                self.playback = None
-                self.playing = False
+            self.playback.terminate()
+            self.playback = None
+            self.playing = False
 
     def play(self) -> None:
         """Resume playback."""
         if self.playback:
-            try:
-                self.playback.play()
-                # Update state based on actual mpv state
-                is_paused = self.playback.is_paused()
-                self.playing = not is_paused if is_paused is not None else True
-            except Exception as e:
-                logger.error(f"Error resuming playback: {e}")
+            self.playback.play()
+            self.playing = True
 
     def pause(self) -> None:
         """Pause playback."""
         if self.playback:
-            try:
-                self.playback.pause()
-                # Update state based on actual mpv state
-                is_paused = self.playback.is_paused()
-                self.playing = not is_paused if is_paused is not None else False
-            except Exception as e:
-                logger.error(f"Error pausing playback: {e}")
+            self.playback.pause()
+            self.playing = False
 
     def is_paused(self) -> Optional[bool]:
-        """Check if playback is paused.
-
-        Returns:
-            True if paused, False if playing, None if not playing or error
-        """
-        if self.playback:
-            return self.playback.is_paused()
-        return None
+        return self.playback.is_paused() if self.playback else None
 
     def get_time_pos(self) -> Optional[float]:
-        """Get current playback position in seconds.
-
-        Returns:
-            Current time position in seconds, or None on error
-        """
-        if self.playback:
-            return self.playback.get_time_pos()
-        return None
+        return self.playback.get_time_pos() if self.playback else None
 
     def get_duration(self) -> Optional[float]:
-        """Get total duration of the current track in seconds.
-
-        Returns:
-            Duration in seconds, or None on error
-        """
-        if self.playback:
-            return self.playback.get_duration()
-        return None
+        return self.playback.get_duration() if self.playback else None
 
     def seek(self, seconds: float, relative: bool = False) -> None:
-        """Seek to a specific position.
-
-        Args:
-            seconds: Time in seconds to seek to (absolute) or offset (relative)
-            relative: If True, seek relative to current position; if False, seek to absolute position
-        """
         if self.playback:
-            try:
-                self.playback.seek(seconds, relative)
-            except Exception as e:
-                logger.error(f"Error seeking: {e}")
+            self.playback.seek(seconds, relative)
 
     def cleanup(self) -> None:
-        """Clean up resources. Call this before destroying the player."""
-        try:
-            self.stop()
-        except Exception as e:
-            logger.warning(f"Error during player cleanup: {e}")
+        """Clean up resources."""
+        self.stop()
 
