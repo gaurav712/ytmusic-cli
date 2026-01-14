@@ -241,6 +241,10 @@ class Interface:
         elif self.searching:
             if key == 'enter':
                 self.handle_search()
+            elif key == 'esc':
+                self.searching = False
+                self.status_text = ''
+                self.status.set_text('')
             elif key and len(key) == 1:
                 self.status_text += key
                 self.status.set_text(self.status_text)
