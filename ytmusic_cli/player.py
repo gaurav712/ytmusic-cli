@@ -15,7 +15,7 @@ from threading import Thread, Lock
 import psutil
 from ytmusicapi import YTMusic
 
-from ytmusic_cli.config import AUTH_HEADERS, IPC_SERVER_PATH, PAUSE_CMD, PLAY_CMD
+from ytmusic_cli.config import AUTH_HEADERS, COOKIES_FILE, IPC_SERVER_PATH, PAUSE_CMD, PLAY_CMD
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +94,11 @@ class PlayerThread(Thread):
                 try:
                     notification_text = self.song_name if self.song_name else self.url
                     subprocess.run(
-                        [notify_send_path, 'YouTube Music', 'Playing: ' + notification_text],
-                        check=False,
-                        capture_output=True,
-                        timeout=2
-                    )
+                            [notify_send_path, 'YouTube Music', 'Playing: ' + notification_text],
+                            check=False,
+                            capture_output=True,
+                            timeout=2
+                            )
                 except (subprocess.TimeoutExpired, FileNotFoundError):
                     # notify-send not available or timed out - not critical
                     pass
@@ -111,21 +111,26 @@ class PlayerThread(Thread):
 
             # Start the player with proper argument escaping
             cmd = [
-                mpv_path,
-                self.url,
-                '--no-video',
-                '--cache=no',
-                '--start=0',
-                f'--input-ipc-server={IPC_SERVER_PATH}'
-            ]
+                    mpv_path,
+                    self.url,
+                    '--no-video',
+                    '--cache=no',
+                    '--start=0',
+                    f'--input-ipc-server={IPC_SERVER_PATH}'
+                    ]
+
+            # Add cookies file if it exists
+            if os.path.exists(COOKIES_FILE):
+                cmd.append(f'--ytdl-raw-options=cookies={COOKIES_FILE}')
+                logger.debug(f"Using cookies file: {COOKIES_FILE}")
             try:
                 self.process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True  # Create new process group
-                )
+                        cmd,
+                        stdout=subprocess.DEVNULL,
+                        stdin=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True  # Create new process group
+                        )
             except FileNotFoundError:
                 logger.error("mpv not found. Please install mpv: sudo apt install mpv (or equivalent)")
                 raise
@@ -187,7 +192,7 @@ class PlayerThread(Thread):
             pid = self.process.pid
             with _process_lock:
                 _mpv_processes.discard(pid)
-            
+
             try:
                 if self.process.poll() is None:
                     # Try process group termination first
@@ -195,7 +200,7 @@ class PlayerThread(Thread):
                         os.killpg(os.getpgid(pid), signal.SIGTERM)
                     except (ProcessLookupError, OSError):
                         self.process.terminate()
-                    
+
                     try:
                         self.process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
@@ -325,25 +330,25 @@ class Player:
 
     def get_recommended(self, callback: Callable[[List[Dict[str, Any]]], None]) -> None:
         """Get recommended songs from YouTube Music home page."""
-        def is_valid_song(item: Dict) -> bool:
-            return 'videoId' in item and 'title' in item and item.get('artists')
-        
+        def is_valid_song(item: Dict) -> bool | None:
+            return ('videoId' in item) and ('title' in item) and item.get('artists')
+
         try:
             home = self.ytmusic.get_home()
             songs = []
-            
+
             for section in home:
                 section_title = section.get('title', '').lower()
                 if 'action' in section_title or 'card' in section_title:
                     continue
-                
+
                 for item in section.get('contents', []):
                     if is_valid_song(item):
                         songs.append(item)
                     for nested in item.get('items', []):
                         if is_valid_song(nested):
                             songs.append(nested)
-            
+
             # Deduplicate by videoId
             seen = set()
             unique = [s for s in songs if s.get('videoId') not in seen and not seen.add(s.get('videoId'))]

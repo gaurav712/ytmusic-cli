@@ -6,7 +6,8 @@ import argparse
 from pathlib import Path
 
 from ytmusic_cli.interface import Interface
-from ytmusic_cli.config import AUTH_HEADERS
+from ytmusic_cli.config import AUTH_HEADERS, COOKIES_FILE
+from ytmusic_cli.cookie_converter import ensure_cookies_file
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -37,6 +38,13 @@ def main() -> None:
         print("Please create the auth headers file or specify a different path with --auth-headers")
         print("See https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html for instructions")
         sys.exit(1)
+
+    # Ensure cookies file is up-to-date
+    try:
+        if not ensure_cookies_file(auth_path, COOKIES_FILE):
+            logging.warning("Failed to create/update cookies file. MPV will continue without cookie support.")
+    except Exception as e:
+        logging.warning(f"Error preparing cookies file: {e}. MPV will continue without cookie support.")
 
     try:
         Interface(auth_path)

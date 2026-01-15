@@ -4,7 +4,6 @@ import urwid
 import signal
 import sys
 import logging
-import time
 from threading import Thread, Event
 from typing import Dict, Any, List, Optional
 
@@ -17,6 +16,7 @@ logger = logging.getLogger(__name__)
 class NoMouseWidget(urwid.WidgetWrap):
     """Widget wrapper that disables all mouse events."""
     def mouse_event(self, size, event, button, col, row, focus):
+        del size, event, button, col, row, focus  # Unused
         return False
 
 
@@ -26,12 +26,14 @@ class SelectableText(urwid.Text):
     signals = ["click"]
 
     def keypress(self, size, key):
+        del size  # Unused
         if self._command_map[key] == urwid.ACTIVATE:
             self._emit('click')
             return None
         return key
 
-    def mouse_event(self, size, event, button, x, y, focus):
+    def mouse_event(self, size, event, button, col, row, focus):
+        del size, col, row, focus  # Unused
         if button == 1 and urwid.util.is_mouse_press(event):
             self._emit('click')
             return True
@@ -41,7 +43,7 @@ class SelectableText(urwid.Text):
 class Interface:
     """Main interface class for the YouTube Music CLI."""
 
-    def __init__(self, auth_headers_path: str = None) -> None:
+    def __init__(self, auth_headers_path: str = "") -> None:
         """Initialize the UI and player."""
         self.status_text = ''
         self.searching = False
@@ -69,21 +71,21 @@ class Interface:
                 ('pack', self.now_playing),
                 ('pack', self.progress_row),
                 ('pack', self.status)
-            ])
+                ])
             self.listbox = CustomListBox(
-                self.handle_keypress,
-                self.is_searching,
-                urwid.SimpleFocusListWalker([])
-            )
+                    self.handle_keypress,
+                    self.is_searching,
+                    urwid.SimpleFocusListWalker([])
+                    )
             body_with_blank = urwid.Pile([
                 ('pack', urwid.Divider()),
                 self.listbox
-            ])
+                ])
             self.frame = urwid.Frame(
-                header=self.header,
-                body=body_with_blank,
-                footer=self.footer
-            )
+                    header=self.header,
+                    body=body_with_blank,
+                    footer=self.footer
+                    )
             top = NoMouseWidget(urwid.Padding(self.frame, left=2, right=2))
 
             # Initialize the player
@@ -96,18 +98,18 @@ class Interface:
 
             # Set up palette for list item highlighting
             palette = [
-                ("normal", "light gray", "default"),  # Normal: transparent/default background
-                ("selected", "black", "light gray"),  # Selected: inverted colors
-            ]
+                    ("normal", "light gray", "default"),  # Normal: transparent/default background
+                    ("selected", "black", "light gray"),  # Selected: inverted colors
+                    ]
             self.mainloop = urwid.MainLoop(top, palette=palette, unhandled_input=self.handle_keypress)
             # Disable mouse interactions
             self.mainloop.screen.set_mouse_tracking(False)
             # Set up recurring alarm to update UI
             self._schedule_progress_update()
-            
+
             # Load recommended songs on boot
             self._load_recommended()
-            
+
             self.mainloop.run()
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
@@ -119,6 +121,7 @@ class Interface:
             self._cleanup()
 
     def _signal_handler(self, signum, frame) -> None:
+        del frame  # Unused
         """Handle termination signals gracefully."""
         logger.info(f"Received signal {signum}, shutting down gracefully...")
         self._cleanup()
@@ -186,14 +189,15 @@ class Interface:
             self.mainloop.set_alarm_in(0.5, self._on_progress_update_alarm)
 
     def _on_progress_update_alarm(self, loop, user_data) -> None:
+        del loop, user_data  # Unused
         """Alarm callback to update progress display."""
         try:
             self._update_progress_display(
-                self._latest_time_pos,
-                self._latest_duration,
-                self._latest_is_paused,
-                self._latest_progress
-            )
+                    self._latest_time_pos,
+                    self._latest_duration,
+                    self._latest_is_paused,
+                    self._latest_progress
+                    )
             # Schedule next update
             self._schedule_progress_update()
         except Exception as e:
@@ -202,7 +206,7 @@ class Interface:
             self._schedule_progress_update()
 
     def _update_progress_display(self, time_pos: Optional[float], duration: Optional[float],
-                                  is_paused: Optional[bool], progress: float) -> None:
+                                 is_paused: Optional[bool], progress: float) -> None:
         """Update the progress display widgets.
 
         Args:
@@ -218,9 +222,9 @@ class Interface:
                     cols, _ = self.mainloop.screen.get_cols_rows()
                 except Exception:
                     pass
-            
+
             width = max(cols - 4, 40)
-            
+
             # Build timer text
             if time_pos is not None:
                 icon = "⏸" if is_paused else "▶"
@@ -239,18 +243,19 @@ class Interface:
                     top_row = timer
             else:
                 top_row = timer or self.current_song_name[:width]
-            
+
             self.now_playing.set_text(top_row[:width])
             self.progress_row.set_text(self._create_text_progress_bar(progress, width - 2))
         except Exception:
             pass
 
     def item_chosen(self, button: urwid.Button, choice: Dict[str, Any]) -> None:
+        del button  # Unused
         """Handle item selection from the list."""
         display_text = self._format_song_display(choice)
         self.now_playing.set_text(display_text)
         self.current_song_name = display_text
-        
+
         if self.player:
             self.player.stop()
             self._latest_time_pos = None
@@ -324,14 +329,14 @@ class Interface:
             return
 
         buttons = [
-            self._create_list_button(self._format_song_display(r), r)
-            for r in search_results
-        ]
+                self._create_list_button(self._format_song_display(r), r)
+                for r in search_results
+                ]
 
         if buttons and self.mainloop:
             self.listbox.body = urwid.SimpleFocusListWalker(buttons)
             self.mainloop.draw_screen()
-        
+
         self.searching = False
         self.status_text = ''
         self.status.set_text('')
