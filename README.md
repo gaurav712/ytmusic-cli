@@ -1,3 +1,5 @@
+> **Note:** This project is moved to Codeberg: https://codeberg.org/gaurav712/ytmusic-cli
+
 # ytmusic-cli
 
 A terminal-based frontend for YouTube Music using urwid for UI, ytmusicapi for API access, and mpv for playback.
